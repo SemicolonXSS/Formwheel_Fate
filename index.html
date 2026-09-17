@@ -116,10 +116,10 @@ input:focus{border-color:#555}
 
   <h3 style="margin-top:20px">이번 라운드의 운명</h3>
   <div class="choiceGrid">
-    <button class="choice" data-choice="safe"><strong>🛡 안전한 운명</strong><small>안정적인 결과를 노린다.</small></button>
-    <button class="choice" data-choice="greed"><strong>💰 탐욕의 운명</strong><small>높은 보상을 노리지만 위험이 커진다.</small></button>
-    <button class="choice" data-choice="chaos"><strong>🌀 혼돈의 운명</strong><small>Wheel의 구성을 크게 흔든다.</small></button>
-    <button class="choice" data-choice="revenge"><strong>⚔ 복수의 운명</strong><small>상대와 관련된 효과가 늘어난다.</small></button>
+    <button class="choice" data-choice="safe"><strong>🛡 안전한 운명</strong><small>+10 ~ -10점</small></button>
+    <button class="choice" data-choice="greed"><strong>💰 탐욕의 운명</strong><small>+50 ~ -50점 · 고위험 고보상</small></button>
+    <button class="choice" data-choice="chaos"><strong>🌀 혼돈의 운명</strong><small>+30 ~ -30점 · 상대 점수와 체인지</small></button>
+    <button class="choice" data-choice="revenge"><strong>⚔ 복수의 운명</strong><small>+10 ~ -10점 · 상대 점수 스틸 ±20</small></button>
   </div>
 
   <div class="actions">
@@ -169,7 +169,7 @@ const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
 function show(el){[setup,lobby,game,result].forEach(x=>x.classList.add("hidden"));el.classList.remove("hidden")}
 function msg(el,text,danger=false){el.textContent=text;el.classList.remove("hidden");el.classList.toggle("danger",danger)}
 function cleanName(s){return String(s||"").trim().slice(0,12)}
-function validCode(s){return /^\d{4}$/.test(s)}
+function validCode(s){return /^\\d{4}$/.test(s)}
 function makeCode(){return String(Math.floor(1000+Math.random()*9000))}
 function pid(){return "p_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8)}
 
@@ -269,7 +269,7 @@ function showGame(){
   $("spinBtn").textContent=localSpun?"돌리기 완료":"내 운명 돌리기";
   $("debtText").textContent="Fate Debt "+(me?.debt||0);
   renderScores();
-  drawWheel(makeSegments(roomData));
+  drawWheel(makeSegments(roomData),0,selectedChoice);
   const all=Object.values(roomData.players||{});
   const done=all.length>0&&all.every(p=>p.spun);
   if(roomData.meta.host===playerId){
@@ -288,6 +288,7 @@ document.querySelectorAll(".choice").forEach(btn=>{
     if(localSpun)return;
     selectedChoice=btn.dataset.choice;
     document.querySelectorAll(".choice").forEach(b=>b.classList.toggle("selected",b===btn));
+    drawWheel(makeSegments({...roomData,players:{...roomData.players,[playerId]:{...roomData.players[playerId],choice:selectedChoice}}}),0,selectedChoice);
     await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{choice:selectedChoice});
     $("spinBtn").disabled=false;
     $("spinStatus").textContent="선택 완료! 이제 Wheel을 돌려봐.";
@@ -298,23 +299,56 @@ $("spinBtn").onclick=async()=>{
   if(spinning||localSpun||!selectedChoice)return;
   spinning=true;$("spinBtn").disabled=true;
   $("spinStatus").textContent="운명이 움직이고 있어...";
+  // Wheel에 실제로 보이는 동일한 배열에서 결과를 먼저 확정한다.
   const segments=makeSegments(roomData);
   const idx=Math.floor(Math.random()*segments.length);
-  const target=idx*(360/segments.length)+360/segments.length/2;
-  await animateWheel(target);
   const outcome=segments[idx];
+  await animateWheelToIndex(segments, idx);
   const change=resolveOutcome(outcome,selectedChoice);
   const me=roomData.players[playerId];
   const oldScore=me.score||0, oldDebt=me.debt||0;
-  const newScore=Math.max(0,oldScore+change.score);
+  let newScore=Math.max(0,oldScore+change.score);
+  let extraUpdates={};
+
+  if(change.special==="steal" && change.targetId){
+    const target=roomData.players[change.targetId];
+    const targetOld=Math.max(0,target?.score||0);
+    const transfer=Math.max(-20,Math.min(20,change.transfer||0));
+    if(transfer>0){
+      const actual=Math.min(transfer,targetOld);
+      newScore=Math.max(0,oldScore+actual);
+      extraUpdates[`players/${change.targetId}/score`]=Math.max(0,targetOld-actual);
+      change.message=`${change.targetName}에게서 ${actual}점을 스틸했어!`;
+    }else if(transfer<0){
+      const give=Math.min(Math.abs(transfer),oldScore);
+      newScore=Math.max(0,oldScore-give);
+      extraUpdates[`players/${change.targetId}/score`]=targetOld+give;
+      change.message=`${change.targetName}에게 ${give}점을 넘겼어!`;
+    }
+  }
+
+  if(change.special==="change" && change.targetId){
+    const target=roomData.players[change.targetId];
+    const targetScore=Math.max(0,target?.score||0);
+    extraUpdates[`players/${change.targetId}/score`]=oldScore;
+    newScore=targetScore;
+    change.message=`${change.targetName}와 점수를 체인지! (${oldScore} ↔ ${targetScore})`;
+  }
+
   const newDebt=Math.max(0,oldDebt+change.debt);
   const style={...(me.style||{safe:0,greed:0,chaos:0,revenge:0})};
   style[selectedChoice]=(style[selectedChoice]||0)+1;
-  await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{
-    score:newScore,debt:newDebt,choice:selectedChoice,spun:true,style
+  await update(ref(db,"fateRooms/"+room),{
+    ...extraUpdates,
+    [`players/${playerId}/score`]:newScore,
+    [`players/${playerId}/debt`]:newDebt,
+    [`players/${playerId}/choice`]:selectedChoice,
+    [`players/${playerId}/spun`]:true,
+    [`players/${playerId}/style`]:style
   });
   $("eventBox").classList.remove("hidden");
-  $("eventBox").innerHTML=`<b>${outcome.name}</b><br>${outcome.text}<br><small>이번 결과: ${change.score>=0?"+":""}${change.score}점</small>`;
+  const resultText=change.message || `이번 결과: ${change.score>=0?"+":""}${change.score}점`;
+  $("eventBox").innerHTML=`<b>${outcome.name}</b><br>${outcome.text}<br><small>${resultText}</small>`;
   $("spinStatus").textContent="결과가 저장되었어. 모든 플레이어가 돌리면 다음 라운드!";
   localSpun=true; spinning=false;
 };
@@ -338,68 +372,197 @@ $("nextBtn").onclick=async()=>{
 };
 
 $("againBtn").onclick=async()=>{
-  if(!roomData)return;
-  const updates={"meta/status":"lobby","meta/round":0,"meta/phase":"waiting"};
-  for(const id of Object.keys(roomData.players||{})){
-    updates[`players/${id}/score`]=0;
-    updates[`players/${id}/debt`]=0;
-    updates[`players/${id}/choice`]="";
-    updates[`players/${id}/spun`]=false;
-    updates[`players/${id}/style`]={safe:0,greed:0,chaos:0,revenge:0};
+  if(!roomData || !room)return;
+  try{
+    const updates={"meta/status":"lobby","meta/round":0,"meta/phase":"waiting"};
+    for(const id of Object.keys(roomData.players||{})){
+      updates[`players/${id}/score`]=0;
+      updates[`players/${id}/debt`]=0;
+      updates[`players/${id}/choice`]="";
+      updates[`players/${id}/spun`]=false;
+      updates[`players/${id}/style`]={safe:0,greed:0,chaos:0,revenge:0};
+    }
+
+    // Firebase 저장과 동시에 화면도 즉시 로비로 전환한다.
+    await update(ref(db,"fateRooms/"+room),updates);
+    roomData.meta.status="lobby";
+    roomData.meta.round=0;
+    roomData.meta.phase="waiting";
+    Object.values(roomData.players||{}).forEach(p=>{
+      p.score=0;p.debt=0;p.choice="";p.spun=false;
+      p.style={safe:0,greed:0,chaos:0,revenge:0};
+    });
+    renderRoom();
+  }catch(err){
+    alert("로비로 돌아가는 중 오류가 발생했어. Firebase 연결/보안 규칙을 확인해줘.");
+    console.error(err);
   }
-  await update(ref(db,"fateRooms/"+room),updates);
 };
 
 function makeSegments(data){
-  const me=data?.players?.[playerId];
-  const style=me?.style||{};
-  const debt=me?.debt||0;
-  let arr=[
-    {name:"+10",text:"운명이 미소 짓는다. 10점을 얻는다.",score:10,debt:0},
-    {name:"+20",text:"좋은 운명이 찾아왔다. 20점을 얻는다.",score:20,debt:1},
-    {name:"×2",text:"현재 점수의 2배가 아니라, 보너스 25점을 얻는다.",score:25,debt:2},
-    {name:"SHIELD",text:"이번 결과는 안전하게 보호된다.",score:8,debt:0},
-    {name:"-10",text:"운명의 파도가 흔들린다. 10점을 잃는다.",score:-10,debt:0},
-    {name:"FATE",text:"운명 보너스! 15점을 얻는다.",score:15,debt:1},
-    {name:"RISK",text:"위험한 결과. 15점을 잃는다.",score:-15,debt:0},
-    {name:"SAFE +15",text:"안전한 운명이 강화된다. 15점을 얻는다.",score:15,debt:0}
+  const choice=data?.players?.[playerId]?.choice||selectedChoice||"safe";
+
+  // 선택한 운명마다 Wheel 자체가 완전히 달라진다.
+  // 사용자가 정한 핵심 범위:
+  // 안전 +10~-10 / 탐욕 +50~-50 / 복수 +10~-10 + 상대 스틸 ±20
+  // 혼돈 +30~-30 + 상대 점수와 체인지
+  if(choice==="safe"){
+    return [
+      {name:"+10",text:"안전한 운명! 10점을 얻는다.",score:10,debt:0},
+      {name:"+7",text:"안전한 운명. 7점을 얻는다.",score:7,debt:0},
+      {name:"+4",text:"안전한 운명. 4점을 얻는다.",score:4,debt:0},
+      {name:"+1",text:"안전하게 1점을 얻는다.",score:1,debt:0},
+      {name:"0",text:"아무 일도 일어나지 않는다.",score:0,debt:0},
+      {name:"-1",text:"조금 흔들린다. 1점을 잃는다.",score:-1,debt:0},
+      {name:"-4",text:"4점을 잃는다.",score:-4,debt:0},
+      {name:"-7",text:"7점을 잃는다.",score:-7,debt:0},
+      {name:"-10",text:"안전한 운명의 최저 결과! 10점을 잃는다.",score:-10,debt:0}
+    ];
+  }
+
+  if(choice==="greed"){
+    return [
+      {name:"+50",text:"대박! 50점을 얻는다.",score:50,debt:2},
+      {name:"+35",text:"탐욕의 큰 보상! 35점을 얻는다.",score:35,debt:2},
+      {name:"+20",text:"20점을 얻는다.",score:20,debt:1},
+      {name:"+10",text:"10점을 얻는다.",score:10,debt:1},
+      {name:"0",text:"아무것도 얻지 못했다.",score:0,debt:1},
+      {name:"-10",text:"탐욕의 대가로 10점을 잃는다.",score:-10,debt:1},
+      {name:"-20",text:"20점을 잃는다.",score:-20,debt:1},
+      {name:"-35",text:"큰 위험! 35점을 잃는다.",score:-35,debt:2},
+      {name:"-50",text:"탐욕의 최악의 결과! 50점을 잃는다.",score:-50,debt:3}
+    ];
+  }
+
+  if(choice==="revenge"){
+    return [
+      {name:"+10",text:"복수 성공! 10점을 얻는다.",score:10,debt:0},
+      {name:"+7",text:"복수의 보상으로 7점을 얻는다.",score:7,debt:0},
+      {name:"+4",text:"4점을 얻는다.",score:4,debt:0},
+      {name:"+1",text:"1점을 얻는다.",score:1,debt:0},
+      {name:"0",text:"복수에 실패했다. 변화가 없다.",score:0,debt:0},
+      {name:"-1",text:"오히려 1점을 잃는다.",score:-1,debt:0},
+      {name:"-4",text:"4점을 잃는다.",score:-4,debt:0},
+      {name:"-7",text:"7점을 잃는다.",score:-7,debt:0},
+      {name:"-10",text:"복수 실패! 10점을 잃는다.",score:-10,debt:0},
+      {name:"STEAL ±20",text:"상대 한 명의 점수를 최대 20점 범위에서 빼앗거나 넘겨받는다.",type:"steal",debt:1}
+    ];
+  }
+
+  // chaos
+  return [
+    {name:"+30",text:"혼돈의 대박! 30점을 얻는다.",score:30,debt:2},
+    {name:"+20",text:"20점을 얻는다.",score:20,debt:1},
+    {name:"+10",text:"10점을 얻는다.",score:10,debt:1},
+    {name:"0",text:"혼돈 속에서 아무 변화도 없다.",score:0,debt:1},
+    {name:"-10",text:"10점을 잃는다.",score:-10,debt:1},
+    {name:"-20",text:"20점을 잃는다.",score:-20,debt:1},
+    {name:"-30",text:"혼돈의 최악의 결과! 30점을 잃는다.",score:-30,debt:2},
+    {name:"CHANGE",text:"상대 한 명과 현재 점수를 서로 교체한다.",type:"change",debt:2}
   ];
-  if(style.greed>=2)arr.push({name:"GREED +30",text:"탐욕이 누적되어 큰 보상을 얻는다.",score:30,debt:3});
-  if(style.chaos>=2)arr.push({name:"CHAOS",text:"혼돈이 발생했다. 운명은 예측할 수 없다.",score:Math.random()<.5?25:-20,debt:1});
-  if(style.revenge>=1)arr.push({name:"REVENGE",text:"복수의 운명. 18점을 얻는다.",score:18,debt:1});
-  if(debt>=4)arr.push({name:"FATE BREAK",text:"Fate Debt가 높다. 균형의 힘이 발동한다.",score:-25,debt:-2});
-  arr.push({name:"WILD",text:"변칙 운명! 5점을 얻는다.",score:5,debt:0});
-  return arr;
 }
+
 function resolveOutcome(o,choice){
-  let score=o.score,debt=o.debt;
-  if(choice==="safe"){score=Math.max(0,score); if(score>0)score+=5}
-  if(choice==="greed"){if(score>0)score=Math.round(score*1.35);else score-=5;debt+=1}
-  if(choice==="chaos"){score=Math.random()<.5?Math.abs(score)+5:-Math.abs(score);debt+=1}
-  if(choice==="revenge" && score<0)score+=10;
-  return {score,debt};
+  let score=o.score||0;
+  let debt=o.debt||0;
+  let special=o.type||"";
+
+  if(special==="steal"){
+    const opponents=Object.entries(roomData.players||{}).filter(([id])=>id!==playerId);
+    if(!opponents.length){
+      return {score:0,debt,special:"none",message:"상대가 없어 스틸 효과가 취소되었어."};
+    }
+    const [targetId,target]=opponents[Math.floor(Math.random()*opponents.length)];
+    let amount=Math.floor(Math.random()*41)-20; // -20 ~ +20
+    const me=roomData.players[playerId];
+    const available=Math.max(0,target.score||0);
+    if(amount>available) amount=available;
+    // +면 상대에게서 빼앗아 내 점수로, -면 내가 상대에게 넘긴다.
+    return {
+      score:amount,
+      debt,
+      special:"steal",
+      targetId,
+      targetName:target.nickname||"상대",
+      transfer:amount,
+      message:amount>0
+        ? `${target.nickname||"상대"}에게서 ${amount}점을 스틸했어!`
+        : amount<0
+          ? `${target.nickname||"상대"}에게 ${Math.abs(amount)}점을 빼앗겼어!`
+          : `${target.nickname||"상대"}와 점수 이동이 없었어.`
+    };
+  }
+
+  if(special==="change"){
+    const opponents=Object.entries(roomData.players||{}).filter(([id])=>id!==playerId);
+    if(!opponents.length){
+      return {score:0,debt,special:"none",message:"상대가 없어 체인지 효과가 취소되었어."};
+    }
+    const [targetId,target]=opponents[Math.floor(Math.random()*opponents.length)];
+    const me=roomData.players[playerId];
+    return {
+      score:0,
+      debt,
+      special:"change",
+      targetId,
+      targetName:target.nickname||"상대",
+      swapScore:target.score||0,
+      message:`${target.nickname||"상대"}와 점수를 체인지!`
+    };
+  }
+
+  return {score,debt,special:"score"};
 }
-function drawWheel(segments,angle=0){
+
+function getChoiceTheme(choice){
+  if(choice==="safe") return {fills:["#dbeafe","#eff6ff","#bfdbfe","#f8fbff"],accent:"#2563eb"};
+  if(choice==="greed") return {fills:["#fef3c7","#fffbeb","#fde68a","#fffdf5"],accent:"#d97706"};
+  if(choice==="chaos") return {fills:["#ede9fe","#faf5ff","#ddd6fe","#fcfaff"],accent:"#7c3aed"};
+  if(choice==="revenge") return {fills:["#fee2e2","#fff1f2","#fecaca","#fff7f7"],accent:"#dc2626"};
+  return {fills:["#ffffff","#eef0f5"],accent:"#171923"};
+}
+
+function drawWheel(segments,angle=0,choice=selectedChoice){
   const c=$("wheel"),ctx=c.getContext("2d"),w=c.width,h=c.height,r=170,cx=w/2,cy=h/2;
   ctx.clearRect(0,0,w,h);
   const n=segments.length,step=Math.PI*2/n;
   segments.forEach((s,i)=>{
     const a=angle+i*step;
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a,a+step);ctx.closePath();
-    ctx.fillStyle=i%2?"#eef0f5":"#ffffff";ctx.fill();ctx.strokeStyle="#d7dae2";ctx.stroke();
+    const theme=getChoiceTheme(choice);
+    ctx.fillStyle=theme.fills[i%theme.fills.length];ctx.fill();
+    ctx.strokeStyle=theme.accent;ctx.globalAlpha=.42;ctx.stroke();ctx.globalAlpha=1;
     ctx.save();ctx.translate(cx,cy);ctx.rotate(a+step/2);ctx.textAlign="right";ctx.fillStyle="#171923";ctx.font="800 15px system-ui";ctx.fillText(s.name,r-12,5);ctx.restore();
   });
-  ctx.beginPath();ctx.arc(cx,cy,39,0,Math.PI*2);ctx.fillStyle="#171923";ctx.fill();
+  const theme=getChoiceTheme(choice);
+  ctx.beginPath();ctx.arc(cx,cy,39,0,Math.PI*2);ctx.fillStyle=theme.accent;ctx.fill();
   ctx.fillStyle="#fff";ctx.textAlign="center";ctx.font="900 14px system-ui";ctx.fillText("FATE",cx,cy+5);
-  ctx.beginPath();ctx.moveTo(cx,cy-r-17);ctx.lineTo(cx-12,cy-r+5);ctx.lineTo(cx+12,cy-r+5);ctx.closePath();ctx.fillStyle="#171923";ctx.fill();
+  ctx.beginPath();ctx.moveTo(cx,cy-r-17);ctx.lineTo(cx-12,cy-r+5);ctx.lineTo(cx+12,cy-r+5);ctx.closePath();ctx.fillStyle=theme.accent;ctx.fill();
 }
-async function animateWheel(target){
-  const c=$("wheel"),start=performance.now(),duration=1700,startAngle=Math.random()*Math.PI*2;
+async function animateWheelToIndex(segments, idx){
+  const start=performance.now(), duration=1800;
+  const step=(Math.PI*2)/segments.length;
+
+  // 화면 위쪽의 포인터(-90도)가 결과 칸의 정확한 중앙을 가리키도록
+  // 최종 회전각을 계산한다.
+  const startAngle=Math.random()*Math.PI*2;
+  const finalBase=-Math.PI/2-(idx+0.5)*step;
+  const turns=6+Math.floor(Math.random()*3);
+  const finalAngle=finalBase+turns*Math.PI*2;
+
   return new Promise(resolve=>{
     function frame(now){
-      const p=Math.min(1,(now-start)/duration),e=1-Math.pow(1-p,4);
-      drawWheel(makeSegments(roomData),startAngle+target*e*Math.PI/180+e*8*Math.PI);
-      if(p<1)requestAnimationFrame(frame);else resolve();
+      const p=Math.min(1,(now-start)/duration);
+      const e=1-Math.pow(1-p,4);
+      const angle=startAngle+(finalAngle-startAngle)*e;
+      drawWheel(segments,angle,selectedChoice);
+      if(p<1){
+        requestAnimationFrame(frame);
+      }else{
+        // 마지막 프레임을 다시 그려 결과 칸과 포인터가 정확히 일치하게 한다.
+        drawWheel(segments,finalAngle,selectedChoice);
+        resolve();
+      }
     }
     requestAnimationFrame(frame);
   });
