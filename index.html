@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f7f8fc">
+<title>FormWheel Fate</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f7f8fc;color:#171923}
+body{display:flex;justify-content:center}
+button,input{font:inherit}
+button{cursor:pointer}
+.app{width:min(1050px,100%);padding:18px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.logo{font-weight:900;font-size:25px;letter-spacing:-1.5px;text-decoration:none;color:#171923}
+.logo span{color:#777}
+.logo .wheel{display:inline-flex;width:29px;height:29px;border:3px solid #171923;border-radius:50%;align-items:center;justify-content:center;margin:0 3px;font-size:16px}
+.card{background:#fff;border:1px solid #e5e7ef;border-radius:22px;padding:22px;box-shadow:0 10px 30px rgba(20,25,40,.06)}
+h1,h2,h3{margin:0 0 10px;letter-spacing:-1px}
+p{color:#687083;line-height:1.55}
+.hidden{display:none!important}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}.app{padding:12px}}
+label{display:block;font-weight:800;margin:14px 0 7px}
+input{width:100%;border:1px solid #dfe3ec;border-radius:13px;padding:13px 14px;outline:none;background:#fafbfe}
+input:focus{border-color:#555}
+.btn{border:0;border-radius:13px;padding:12px 16px;font-weight:850;background:#171923;color:white}
+.btn.secondary{background:#eef0f5;color:#171923}
+.btn.ghost{background:white;border:1px solid #dfe3ec;color:#171923}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.choiceGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.choice{padding:15px;border:1px solid #e0e3ea;background:#fff;border-radius:15px;text-align:left}
+.choice strong{display:block;margin-bottom:4px}
+.choice small{color:#72798a}
+.choice.selected{border:2px solid #171923;padding:14px;background:#f5f6fa}
+.room{font-size:35px;font-weight:950;letter-spacing:7px;text-align:center;padding:15px;background:#f4f5f8;border-radius:17px;margin:10px 0}
+.players{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}
+@media(max-width:600px){.players{grid-template-columns:repeat(2,1fr)}}
+.player{padding:13px;border:1px solid #e4e6ec;border-radius:14px;background:#fafbfc}
+.player .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#38a169;margin-right:6px}
+.player.me{border-color:#171923}
+.wheelWrap{display:flex;justify-content:center;margin:12px 0 18px}
+#wheel{width:min(390px,86vw);height:min(390px,86vw);max-width:390px;max-height:390px}
+.status{text-align:center;font-weight:850;color:#555e70;min-height:25px}
+.scoreGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px}
+.score{padding:12px;border:1px solid #e3e5eb;border-radius:14px;background:#fff;text-align:center}
+.score b{display:block;font-size:21px}
+.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#eef0f5;color:#555d70;font-size:12px;font-weight:800}
+.event{margin-top:12px;padding:13px;border-radius:14px;background:#f5f6f9;line-height:1.5}
+.notice{padding:12px 14px;border-radius:13px;background:#f1f4ff;margin-top:12px;color:#424a61}
+.danger{background:#fff0f0;color:#a33}
+.footer{text-align:center;color:#9aa0ae;font-size:12px;margin:18px}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <a class="logo" href="https://semicolonxss.github.io/Formwheel/">Form<span>◉</span>Wheel</a>
+  <span class="badge">FATE · ONLINE</span>
+</header>
+
+<section id="setup" class="card">
+  <h1>FormWheel Fate</h1>
+  <p>내 선택과 이전 라운드의 행동이 다음 Wheel에 영향을 주는 운명형 멀티플레이 게임.</p>
+  <div class="grid">
+    <div>
+      <label>닉네임</label>
+      <input id="nickname" maxlength="12" placeholder="최대 12글자">
+      <label>방 코드</label>
+      <input id="roomCode" maxlength="4" inputmode="numeric" placeholder="예: 4821">
+      <div class="actions">
+        <button class="btn" id="joinBtn">방 참가</button>
+        <button class="btn secondary" id="createBtn">새 방 만들기</button>
+      </div>
+    </div>
+    <div>
+      <h3>게임 규칙</h3>
+      <p>• 최대 <b>6명</b><br>
+      • 총 6라운드<br>
+      • 매 라운드 운명 선택<br>
+      • 행동 기록에 따라 Wheel 구성 변화<br>
+      • 호스트가 다음 라운드를 진행<br>
+      • 점수와 Fate 상태는 Firebase에 실시간 저장</p>
+    </div>
+  </div>
+  <div id="setupMsg" class="notice hidden"></div>
+</section>
+
+<section id="lobby" class="card hidden">
+  <h2>운명 대기실</h2>
+  <p>친구에게 아래 4자리 코드를 알려줘!</p>
+  <div class="room" id="roomDisplay">----</div>
+  <div class="players" id="players"></div>
+  <div class="notice">현재 인원: <b id="playerCount">0</b> / 6</div>
+  <div class="actions">
+    <button class="btn" id="startBtn">게임 시작</button>
+    <button class="btn secondary" id="leaveBtn">나가기</button>
+  </div>
+  <div id="lobbyMsg" class="notice hidden"></div>
+</section>
+
+<section id="game" class="card hidden">
+  <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+    <div>
+      <span class="badge" id="roundText">ROUND 1 / 6</span>
+      <h2 style="margin-top:8px">운명의 Wheel</h2>
+    </div>
+    <span class="badge" id="debtText">Fate Debt 0</span>
+  </div>
+
+  <div class="scoreGrid" id="scoreGrid"></div>
+  <div class="wheelWrap"><canvas id="wheel" width="390" height="390"></canvas></div>
+  <div class="status" id="spinStatus">운명을 선택하고 Wheel을 돌려봐!</div>
+
+  <h3 style="margin-top:20px">이번 라운드의 운명</h3>
+  <div class="choiceGrid">
+    <button class="choice" data-choice="safe"><strong>🛡 안전한 운명</strong><small>안정적인 결과를 노린다.</small></button>
+    <button class="choice" data-choice="greed"><strong>💰 탐욕의 운명</strong><small>높은 보상을 노리지만 위험이 커진다.</small></button>
+    <button class="choice" data-choice="chaos"><strong>🌀 혼돈의 운명</strong><small>Wheel의 구성을 크게 흔든다.</small></button>
+    <button class="choice" data-choice="revenge"><strong>⚔ 복수의 운명</strong><small>상대와 관련된 효과가 늘어난다.</small></button>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="spinBtn" disabled>내 운명 돌리기</button>
+    <button class="btn secondary hidden" id="nextBtn">다음 라운드</button>
+  </div>
+  <div id="eventBox" class="event hidden"></div>
+</section>
+
+<section id="result" class="card hidden">
+  <h1>운명은 결정되었다.</h1>
+  <p>이번 게임의 최종 결과</p>
+  <div id="finalScores" class="scoreGrid"></div>
+  <div class="actions">
+    <button class="btn" id="againBtn">로비로 돌아가기</button>
+    <a class="btn secondary" href="https://semicolonxss.github.io/Formwheel/">메인으로</a>
+  </div>
+</section>
+<div class="footer">FormWheel Fate · Firebase Realtime Database</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getDatabase, ref, set, get, update, onValue, remove } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
+  authDomain: "formwheel.firebaseapp.com",
+  databaseURL: "https://formwheel-default-rtdb.firebaseio.com",
+  projectId: "formwheel",
+  storageBucket: "formwheel.firebasestorage.app",
+  messagingSenderId: "431583088241",
+  appId: "1:431583088241:web:74e0e34ea1e3e1170c55d0",
+  measurementId: "G-T372YXDF8D"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const MAX_PLAYERS=6, MAX_ROUNDS=6;
+let room="", playerId="", nickname="", isHost=false, roomData=null;
+let unsubscribe=null, selectedChoice="", localSpun=false, spinning=false;
+
+const $=id=>document.getElementById(id);
+const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
+
+function show(el){[setup,lobby,game,result].forEach(x=>x.classList.add("hidden"));el.classList.remove("hidden")}
+function msg(el,text,danger=false){el.textContent=text;el.classList.remove("hidden");el.classList.toggle("danger",danger)}
+function cleanName(s){return String(s||"").trim().slice(0,12)}
+function validCode(s){return /^\\d{4}$/.test(s)}
+function makeCode(){return String(Math.floor(1000+Math.random()*9000))}
+function pid(){return "p_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8)}
+
+$("createBtn").onclick=async()=>{
+  nickname=cleanName($("nickname").value);
+  if(!nickname)return msg($("setupMsg"),"닉네임을 입력해줘.",true);
+  room=makeCode(); playerId=pid(); isHost=true;
+  const roomRef=ref(db,"fateRooms/"+room);
+  const existing=await get(roomRef);
+  if(existing.exists()){ $("createBtn").click(); return; }
+  const data={
+    meta:{host:playerId,status:"lobby",round:0,maxPlayers:MAX_PLAYERS,maxRounds:MAX_ROUNDS,createdAt:Date.now()},
+    players:{[playerId]:{nickname,score:0,debt:0,choice:"",spun:false,style:{safe:0,greed:0,chaos:0,revenge:0},joinedAt:Date.now()}}
+  };
+  await set(roomRef,data);
+  enterRoom();
+};
+
+$("joinBtn").onclick=async()=>{
+  nickname=cleanName($("nickname").value);
+  room=$("roomCode").value.trim();
+  if(!nickname)return msg($("setupMsg"),"닉네임을 입력해줘.",true);
+  if(!validCode(room))return msg($("setupMsg"),"4자리 방 코드를 입력해줘.",true);
+  const snap=await get(ref(db,"fateRooms/"+room));
+  if(!snap.exists())return msg($("setupMsg"),"존재하지 않는 방이야.",true);
+  const d=snap.val();
+  const count=Object.keys(d.players||{}).length;
+  if(count>=MAX_PLAYERS)return msg($("setupMsg"),"이 방은 이미 6명이야.",true);
+  if(d.meta?.status!=="lobby")return msg($("setupMsg"),"이미 게임이 시작된 방이야.",true);
+  playerId=pid(); isHost=false;
+  await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{
+    nickname,score:0,debt:0,choice:"",spun:false,
+    style:{safe:0,greed:0,chaos:0,revenge:0},joinedAt:Date.now()
+  });
+  enterRoom();
+};
+
+function enterRoom(){
+  $("roomDisplay").textContent=room;
+  show(lobby);
+  if(unsubscribe)unsubscribe();
+  unsubscribe=onValue(ref(db,"fateRooms/"+room),snap=>{
+    if(!snap.exists()){leaveLocal();return}
+    roomData=snap.val(); renderRoom();
+  });
+}
+
+function renderRoom(){
+  const players=roomData.players||{};
+  const list=Object.entries(players);
+  $("playerCount").textContent=list.length;
+  $("players").innerHTML=list.map(([id,p])=>`
+    <div class="player ${id===playerId?"me":""}">
+      <div><span class="dot"></span><b>${escapeHtml(p.nickname||"Player")}</b></div>
+      <small>${id===roomData.meta?.host?"👑 호스트":"참가자"}</small>
+    </div>`).join("");
+  $("startBtn").disabled=roomData.meta?.host!==playerId || list.length<1;
+  $("startBtn").textContent=list.length>=2?"게임 시작":"게임 시작 (혼자도 가능)";
+  if(roomData.meta?.status==="playing") showGame();
+  if(roomData.meta?.status==="result") showResult();
+}
+
+$("startBtn").onclick=async()=>{
+  if(roomData?.meta?.host!==playerId)return;
+  await update(ref(db,"fateRooms/"+room+"/meta"),{status:"playing",round:1,phase:"spinning"});
+};
+
+$("leaveBtn").onclick=async()=>{
+  if(!room)return;
+  if(isHost){
+    const players=Object.keys(roomData?.players||{}).filter(x=>x!==playerId);
+    if(players.length){
+      const newHost=players[0];
+      await update(ref(db,"fateRooms/"+room+"/meta"),{host:newHost});
+      await remove(ref(db,"fateRooms/"+room+"/players/"+playerId));
+      isHost=false;
+    }else await remove(ref(db,"fateRooms/"+room));
+  }else await remove(ref(db,"fateRooms/"+room+"/players/"+playerId));
+  leaveLocal();
+};
+
+function leaveLocal(){
+  if(unsubscribe)unsubscribe();
+  unsubscribe=null; room="";playerId="";isHost=false;roomData=null;
+  show(setup);
+}
+
+function showGame(){
+  show(game);
+  const round=roomData.meta.round||1;
+  $("roundText").textContent=`ROUND ${round} / ${MAX_ROUNDS}`;
+  const me=roomData.players?.[playerId];
+  selectedChoice=me?.choice||"";
+  localSpun=!!me?.spun;
+  document.querySelectorAll(".choice").forEach(b=>b.classList.toggle("selected",b.dataset.choice===selectedChoice));
+  $("spinBtn").disabled=!selectedChoice||localSpun||spinning;
+  $("spinBtn").textContent=localSpun?"돌리기 완료":"내 운명 돌리기";
+  $("debtText").textContent="Fate Debt "+(me?.debt||0);
+  renderScores();
+  drawWheel(makeSegments(roomData));
+  const all=Object.values(roomData.players||{});
+  const done=all.length>0&&all.every(p=>p.spun);
+  if(roomData.meta.host===playerId){
+    $("nextBtn").classList.toggle("hidden",!done);
+    $("nextBtn").disabled=!done;
+  }else $("nextBtn").classList.add("hidden");
+}
+
+function renderScores(){
+  $("scoreGrid").innerHTML=Object.entries(roomData.players||{}).map(([id,p])=>`
+    <div class="score"><span>${escapeHtml(p.nickname||"Player")}${id===playerId?" ★":""}</span><b>${p.score||0}</b><small>Debt ${p.debt||0}</small></div>`).join("");
+}
+
+document.querySelectorAll(".choice").forEach(btn=>{
+  btn.onclick=async()=>{
+    if(localSpun)return;
+    selectedChoice=btn.dataset.choice;
+    document.querySelectorAll(".choice").forEach(b=>b.classList.toggle("selected",b===btn));
+    await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{choice:selectedChoice});
+    $("spinBtn").disabled=false;
+    $("spinStatus").textContent="선택 완료! 이제 Wheel을 돌려봐.";
+  };
+});
+
+$("spinBtn").onclick=async()=>{
+  if(spinning||localSpun||!selectedChoice)return;
+  spinning=true;$("spinBtn").disabled=true;
+  $("spinStatus").textContent="운명이 움직이고 있어...";
+  const segments=makeSegments(roomData);
+  const idx=Math.floor(Math.random()*segments.length);
+  const target=idx*(360/segments.length)+360/segments.length/2;
+  await animateWheel(target);
+  const outcome=segments[idx];
+  const change=resolveOutcome(outcome,selectedChoice);
+  const me=roomData.players[playerId];
+  const oldScore=me.score||0, oldDebt=me.debt||0;
+  const newScore=Math.max(0,oldScore+change.score);
+  const newDebt=Math.max(0,oldDebt+change.debt);
+  const style={...(me.style||{safe:0,greed:0,chaos:0,revenge:0})};
+  style[selectedChoice]=(style[selectedChoice]||0)+1;
+  await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{
+    score:newScore,debt:newDebt,choice:selectedChoice,spun:true,style
+  });
+  $("eventBox").classList.remove("hidden");
+  $("eventBox").innerHTML=`<b>${outcome.name}</b><br>${outcome.text}<br><small>이번 결과: ${change.score>=0?"+":""}${change.score}점</small>`;
+  $("spinStatus").textContent="결과가 저장되었어. 모든 플레이어가 돌리면 다음 라운드!";
+  localSpun=true; spinning=false;
+};
+
+$("nextBtn").onclick=async()=>{
+  if(roomData.meta.host!==playerId)return;
+  const round=roomData.meta.round||1;
+  if(round>=MAX_ROUNDS){
+    await update(ref(db,"fateRooms/"+room+"/meta"),{status:"result",phase:"done"});
+    return;
+  }
+  const updates={};
+  for(const id of Object.keys(roomData.players||{})){
+    updates[`players/${id}/choice`]="";
+    updates[`players/${id}/spun`]=false;
+  }
+  updates["meta/round"]=round+1;
+  updates["meta/phase"]="spinning";
+  await update(ref(db,"fateRooms/"+room),updates);
+  $("eventBox").classList.add("hidden");
+};
+
+$("againBtn").onclick=async()=>{
+  if(!roomData)return;
+  const updates={"meta/status":"lobby","meta/round":0,"meta/phase":"waiting"};
+  for(const id of Object.keys(roomData.players||{})){
+    updates[`players/${id}/score`]=0;
+    updates[`players/${id}/debt`]=0;
+    updates[`players/${id}/choice`]="";
+    updates[`players/${id}/spun`]=false;
+    updates[`players/${id}/style`]={safe:0,greed:0,chaos:0,revenge:0};
+  }
+  await update(ref(db,"fateRooms/"+room),updates);
+};
+
+function makeSegments(data){
+  const me=data?.players?.[playerId];
+  const style=me?.style||{};
+  const debt=me?.debt||0;
+  let arr=[
+    {name:"+10",text:"운명이 미소 짓는다. 10점을 얻는다.",score:10,debt:0},
+    {name:"+20",text:"좋은 운명이 찾아왔다. 20점을 얻는다.",score:20,debt:1},
+    {name:"×2",text:"현재 점수의 2배가 아니라, 보너스 25점을 얻는다.",score:25,debt:2},
+    {name:"SHIELD",text:"이번 결과는 안전하게 보호된다.",score:8,debt:0},
+    {name:"-10",text:"운명의 파도가 흔들린다. 10점을 잃는다.",score:-10,debt:0},
+    {name:"FATE",text:"운명 보너스! 15점을 얻는다.",score:15,debt:1},
+    {name:"RISK",text:"위험한 결과. 15점을 잃는다.",score:-15,debt:0},
+    {name:"SAFE +15",text:"안전한 운명이 강화된다. 15점을 얻는다.",score:15,debt:0}
+  ];
+  if(style.greed>=2)arr.push({name:"GREED +30",text:"탐욕이 누적되어 큰 보상을 얻는다.",score:30,debt:3});
+  if(style.chaos>=2)arr.push({name:"CHAOS",text:"혼돈이 발생했다. 운명은 예측할 수 없다.",score:Math.random()<.5?25:-20,debt:1});
+  if(style.revenge>=1)arr.push({name:"REVENGE",text:"복수의 운명. 18점을 얻는다.",score:18,debt:1});
+  if(debt>=4)arr.push({name:"FATE BREAK",text:"Fate Debt가 높다. 균형의 힘이 발동한다.",score:-25,debt:-2});
+  arr.push({name:"WILD",text:"변칙 운명! 5점을 얻는다.",score:5,debt:0});
+  return arr;
+}
+function resolveOutcome(o,choice){
+  let score=o.score,debt=o.debt;
+  if(choice==="safe"){score=Math.max(0,score); if(score>0)score+=5}
+  if(choice==="greed"){if(score>0)score=Math.round(score*1.35);else score-=5;debt+=1}
+  if(choice==="chaos"){score=Math.random()<.5?Math.abs(score)+5:-Math.abs(score);debt+=1}
+  if(choice==="revenge" && score<0)score+=10;
+  return {score,debt};
+}
+function drawWheel(segments,angle=0){
+  const c=$("wheel"),ctx=c.getContext("2d"),w=c.width,h=c.height,r=170,cx=w/2,cy=h/2;
+  ctx.clearRect(0,0,w,h);
+  const n=segments.length,step=Math.PI*2/n;
+  segments.forEach((s,i)=>{
+    const a=angle+i*step;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a,a+step);ctx.closePath();
+    ctx.fillStyle=i%2?"#eef0f5":"#ffffff";ctx.fill();ctx.strokeStyle="#d7dae2";ctx.stroke();
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(a+step/2);ctx.textAlign="right";ctx.fillStyle="#171923";ctx.font="800 15px system-ui";ctx.fillText(s.name,r-12,5);ctx.restore();
+  });
+  ctx.beginPath();ctx.arc(cx,cy,39,0,Math.PI*2);ctx.fillStyle="#171923";ctx.fill();
+  ctx.fillStyle="#fff";ctx.textAlign="center";ctx.font="900 14px system-ui";ctx.fillText("FATE",cx,cy+5);
+  ctx.beginPath();ctx.moveTo(cx,cy-r-17);ctx.lineTo(cx-12,cy-r+5);ctx.lineTo(cx+12,cy-r+5);ctx.closePath();ctx.fillStyle="#171923";ctx.fill();
+}
+async function animateWheel(target){
+  const c=$("wheel"),start=performance.now(),duration=1700,startAngle=Math.random()*Math.PI*2;
+  return new Promise(resolve=>{
+    function frame(now){
+      const p=Math.min(1,(now-start)/duration),e=1-Math.pow(1-p,4);
+      drawWheel(makeSegments(roomData),startAngle+target*e*Math.PI/180+e*8*Math.PI);
+      if(p<1)requestAnimationFrame(frame);else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}
+function showResult(){
+  show(result);
+  const list=Object.values(roomData.players||{}).sort((a,b)=>(b.score||0)-(a.score||0));
+  $("finalScores").innerHTML=list.map(p=>`<div class="score"><span>${escapeHtml(p.nickname||"Player")}</span><b>${p.score||0}</b><small>Fate Debt ${p.debt||0}</small></div>`).join("");
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+</script>
+</body>
+</html>
