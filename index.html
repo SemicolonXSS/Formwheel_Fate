@@ -169,7 +169,7 @@ const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
 function show(el){[setup,lobby,game,result].forEach(x=>x.classList.add("hidden"));el.classList.remove("hidden")}
 function msg(el,text,danger=false){el.textContent=text;el.classList.remove("hidden");el.classList.toggle("danger",danger)}
 function cleanName(s){return String(s||"").trim().slice(0,12)}
-function validCode(s){return /^\\d{4}$/.test(s)}
+function validCode(s){return /^\d{4}$/.test(s)}
 function makeCode(){return String(Math.floor(1000+Math.random()*9000))}
 function pid(){return "p_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8)}
 
