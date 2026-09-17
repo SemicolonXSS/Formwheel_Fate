@@ -48,10 +48,17 @@ input:focus{border-color:#555}
 .score{padding:12px;border:1px solid #e3e5eb;border-radius:14px;background:#fff;text-align:center}
 .score b{display:block;font-size:21px}
 .badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#eef0f5;color:#555d70;font-size:12px;font-weight:800}
+.badge.warn{background:#fff0d6;color:#9a5b00}
+.badge.break{background:#ffe0e0;color:#a33}
 .event{margin-top:12px;padding:13px;border-radius:14px;background:#f5f6f9;line-height:1.5}
 .notice{padding:12px 14px;border-radius:13px;background:#f1f4ff;margin-top:12px;color:#424a61}
 .danger{background:#fff0f0;color:#a33}
 .footer{text-align:center;color:#9aa0ae;font-size:12px;margin:18px}
+.styleBar{display:flex;height:9px;border-radius:999px;overflow:hidden;margin-top:6px;background:#eef0f5}
+.styleBar span{height:100%}
+.styleLegend{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:#72798a}
+.styleLegend b{color:inherit}
+.leaderTag{display:block;margin-top:4px;color:#d97706!important;font-weight:800}
 </style>
 </head>
 <body>
@@ -81,11 +88,15 @@ input:focus{border-color:#555}
       • 총 6라운드<br>
       • 매 라운드 운명 선택<br>
       • 행동 기록에 따라 Wheel 구성 변화<br>
+      • 운명의 빚이 쌓이면 FATE BREAK 발생<br>
       • 호스트가 다음 라운드를 진행<br>
       • 점수와 Fate 상태는 Firebase에 실시간 저장</p>
     </div>
   </div>
   <div id="setupMsg" class="notice hidden"></div>
+  <div class="card" style="margin-top:16px;box-shadow:none;border-style:dashed" id="globalPanel">
+    <p style="margin:0">전체 게임 통계를 불러오는 중...</p>
+  </div>
 </section>
 
 <section id="lobby" class="card hidden">
@@ -111,15 +122,16 @@ input:focus{border-color:#555}
   </div>
 
   <div class="scoreGrid" id="scoreGrid"></div>
+  <div id="fateBreakBanner" class="notice danger hidden"></div>
   <div class="wheelWrap"><canvas id="wheel" width="390" height="390"></canvas></div>
   <div class="status" id="spinStatus">운명을 선택하고 Wheel을 돌려봐!</div>
 
   <h3 style="margin-top:20px">이번 라운드의 운명</h3>
   <div class="choiceGrid">
-    <button class="choice" data-choice="safe"><strong>🛡 안전한 운명</strong><small>+10 ~ -10점</small></button>
-    <button class="choice" data-choice="greed"><strong>💰 탐욕의 운명</strong><small>+50 ~ -50점 · 고위험 고보상</small></button>
-    <button class="choice" data-choice="chaos"><strong>🌀 혼돈의 운명</strong><small>+30 ~ -30점 · 상대 점수와 체인지</small></button>
-    <button class="choice" data-choice="revenge"><strong>⚔ 복수의 운명</strong><small>+10 ~ -10점 · 상대 점수 스틸 ±20</small></button>
+    <button class="choice" data-choice="safe"><strong>🛡 안전한 운명</strong><small>+10 ~ -10점</small><small class="leaderTag hidden">🔥 전체 1위 효과</small></button>
+    <button class="choice" data-choice="greed"><strong>💰 탐욕의 운명</strong><small>+50 ~ -50점 · 고위험 고보상</small><small class="leaderTag hidden">🔥 전체 1위 효과</small></button>
+    <button class="choice" data-choice="chaos"><strong>🌀 혼돈의 운명</strong><small>+30 ~ -30점 · 상대 점수와 체인지</small><small class="leaderTag hidden">🔥 전체 1위 효과</small></button>
+    <button class="choice" data-choice="revenge"><strong>⚔ 복수의 운명</strong><small>+10 ~ -10점 · 상대 점수 스틸 ±20</small><small class="leaderTag hidden">🔥 전체 1위 효과</small></button>
   </div>
 
   <div class="actions">
@@ -127,6 +139,12 @@ input:focus{border-color:#555}
     <button class="btn secondary hidden" id="nextBtn">다음 라운드</button>
   </div>
   <div id="eventBox" class="event hidden"></div>
+
+  <div class="card" style="margin-top:18px;box-shadow:none;border-style:dashed">
+    <h3>내 운명 성향</h3>
+    <div id="styleBar" class="styleBar"></div>
+    <div id="styleLegend" class="styleLegend"></div>
+  </div>
 </section>
 
 <section id="result" class="card hidden">
@@ -137,13 +155,18 @@ input:focus{border-color:#555}
     <button class="btn" id="againBtn">로비로 돌아가기</button>
     <a class="btn secondary" href="https://semicolonxss.github.io/Formwheel/">메인으로</a>
   </div>
+  <div class="card" style="margin-top:18px;box-shadow:none;border-style:dashed">
+    <h3>🏆 전체 게임 통합 리더보드</h3>
+    <p style="margin-top:-6px">FormWheel의 모든 게임(Form · Wheel · Quiz · Battle · Fate) 기록 중 최고 점수</p>
+    <div id="globalLeaderboard"><p style="color:#9aa0ae">불러오는 중...</p></div>
+  </div>
 </section>
 <div class="footer">FormWheel Fate · Firebase Realtime Database</div>
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-import { getDatabase, ref, set, get, update, onValue, remove } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+import { getDatabase, ref, set, get, update, onValue, remove, push, increment } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
@@ -160,8 +183,46 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 const MAX_PLAYERS=6, MAX_ROUNDS=6;
+const FATE_BREAK_THRESHOLD=6; // Fate Debt가 이 값 이상이면 다음 스핀에 FATE BREAK 이벤트가 섞인다
+const LEADER_BONUS=1.15; // 전체 누적 선택 횟수 1위 운명에 적용되는 특별 배율
 let room="", playerId="", nickname="", isHost=false, roomData=null;
 let unsubscribe=null, selectedChoice="", localSpun=false, spinning=false;
+let globalStats={safe:0,greed:0,chaos:0,revenge:0};
+
+// 전체 게임(모든 방)에서 누적된 운명별 선택 횟수를 구독한다.
+// 이 값은 FormWheel 메인 페이지의 리더보드/통계와 동일한 Firebase 경로를 사용한다.
+onValue(ref(db,"globalStats/choiceCounts"),snap=>{
+  const v=snap.val()||{};
+  globalStats={safe:v.safe||0,greed:v.greed||0,chaos:v.chaos||0,revenge:v.revenge||0};
+  renderGlobalPanel();
+  if(game && !game.classList.contains("hidden")) showGame();
+});
+
+function getLeaderChoice(){
+  const entries=Object.entries(globalStats);
+  const total=entries.reduce((a,[,v])=>a+v,0);
+  if(!total)return null;
+  entries.sort((a,b)=>b[1]-a[1]);
+  const [choice,count]=entries[0];
+  return {choice,count,total};
+}
+
+function renderGlobalPanel(){
+  const el=$("globalPanel");
+  if(!el)return;
+  const leader=getLeaderChoice();
+  if(!leader){
+    el.innerHTML=`<p style="margin:0">아직 전체 게임 기록이 없어. 첫 스핀이 통계를 시작해!</p>`;
+    return;
+  }
+  const label=STYLE_LABELS[leader.choice];
+  el.innerHTML=`
+    <p style="margin:0 0 6px">이때까지 <b>${label}</b>이(가) 총 <b>${leader.count.toLocaleString()}</b>번 선택되었습니다. (전체 1위)</p>
+    <p style="margin:0;color:#171923;font-weight:800">→ ${label}에 특별 효과가 적용됩니다 (결과 폭 x${LEADER_BONUS})</p>
+    <div class="styleLegend" style="margin-top:8px">
+      ${Object.entries(globalStats).map(([k,v])=>`<span><b style="color:${STYLE_COLORS[k]}">●</b> ${STYLE_LABELS[k]} ${v.toLocaleString()}회</span>`).join("")}
+    </div>`;
+}
 
 const $=id=>document.getElementById(id);
 const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
@@ -169,7 +230,7 @@ const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
 function show(el){[setup,lobby,game,result].forEach(x=>x.classList.add("hidden"));el.classList.remove("hidden")}
 function msg(el,text,danger=false){el.textContent=text;el.classList.remove("hidden");el.classList.toggle("danger",danger)}
 function cleanName(s){return String(s||"").trim().slice(0,12)}
-function validCode(s){return /^\\d{4}$/.test(s)}
+function validCode(s){return /^\d{4}$/.test(s)}
 function makeCode(){return String(Math.floor(1000+Math.random()*9000))}
 function pid(){return "p_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8)}
 
@@ -182,7 +243,7 @@ $("createBtn").onclick=async()=>{
   if(existing.exists()){ $("createBtn").click(); return; }
   const data={
     meta:{host:playerId,status:"lobby",round:0,maxPlayers:MAX_PLAYERS,maxRounds:MAX_ROUNDS,createdAt:Date.now()},
-    players:{[playerId]:{nickname,score:0,debt:0,choice:"",spun:false,style:{safe:0,greed:0,chaos:0,revenge:0},joinedAt:Date.now()}}
+    players:{[playerId]:{nickname,score:0,debt:0,choice:"",spun:false,style:{safe:0,greed:0,chaos:0,revenge:0},streak:{choice:"",count:0},joinedAt:Date.now()}}
   };
   await set(roomRef,data);
   enterRoom();
@@ -202,7 +263,7 @@ $("joinBtn").onclick=async()=>{
   playerId=pid(); isHost=false;
   await update(ref(db,"fateRooms/"+room+"/players/"+playerId),{
     nickname,score:0,debt:0,choice:"",spun:false,
-    style:{safe:0,greed:0,chaos:0,revenge:0},joinedAt:Date.now()
+    style:{safe:0,greed:0,chaos:0,revenge:0},streak:{choice:"",count:0},joinedAt:Date.now()
   });
   enterRoom();
 };
@@ -267,8 +328,21 @@ function showGame(){
   document.querySelectorAll(".choice").forEach(b=>b.classList.toggle("selected",b.dataset.choice===selectedChoice));
   $("spinBtn").disabled=!selectedChoice||localSpun||spinning;
   $("spinBtn").textContent=localSpun?"돌리기 완료":"내 운명 돌리기";
-  $("debtText").textContent="Fate Debt "+(me?.debt||0);
+  const debt=me?.debt||0;
+  $("debtText").textContent="Fate Debt "+debt;
+  $("debtText").className="badge"+(debt>=FATE_BREAK_THRESHOLD?" break":debt>=3?" warn":"");
+  const banner=$("fateBreakBanner");
+  if(debt>=FATE_BREAK_THRESHOLD && !localSpun){
+    banner.classList.remove("hidden");
+    banner.textContent="⚠️ FATE BREAK — 운명의 빚이 너무 높습니다. 이번 Wheel에는 특수 결과가 추가됩니다.";
+  }else banner.classList.add("hidden");
   renderScores();
+  renderStyleBar(me);
+  renderGlobalPanel();
+  const leader=getLeaderChoice();
+  document.querySelectorAll(".choice").forEach(b=>{
+    b.querySelector(".leaderTag")?.classList.toggle("hidden",!(leader&&leader.choice===b.dataset.choice));
+  });
   drawWheel(makeSegments(roomData),0,selectedChoice);
   const all=Object.values(roomData.players||{});
   const done=all.length>0&&all.every(p=>p.spun);
@@ -281,6 +355,27 @@ function showGame(){
 function renderScores(){
   $("scoreGrid").innerHTML=Object.entries(roomData.players||{}).map(([id,p])=>`
     <div class="score"><span>${escapeHtml(p.nickname||"Player")}${id===playerId?" ★":""}</span><b>${p.score||0}</b><small>Debt ${p.debt||0}</small></div>`).join("");
+}
+
+const STYLE_COLORS={safe:"#2563eb",greed:"#d97706",chaos:"#7c3aed",revenge:"#dc2626"};
+const STYLE_LABELS={safe:"안전",greed:"탐욕",chaos:"혼돈",revenge:"복수"};
+function renderStyleBar(me){
+  const style=me?.style||{safe:0,greed:0,chaos:0,revenge:0};
+  const total=Object.values(style).reduce((a,b)=>a+b,0);
+  const bar=$("styleBar"), legend=$("styleLegend");
+  if(!total){
+    bar.innerHTML=`<span style="width:100%;background:#eef0f5"></span>`;
+    legend.innerHTML=`<span>아직 기록 없음</span>`;
+    return;
+  }
+  bar.innerHTML=Object.entries(style).map(([k,v])=>{
+    const pct=(v/total*100);
+    return pct>0?`<span style="width:${pct}%;background:${STYLE_COLORS[k]}"></span>`:"";
+  }).join("");
+  legend.innerHTML=Object.entries(style).map(([k,v])=>{
+    const pct=Math.round(v/total*100);
+    return `<span><b style="color:${STYLE_COLORS[k]}">●</b> ${STYLE_LABELS[k]} ${pct}%</span>`;
+  }).join("");
 }
 
 document.querySelectorAll(".choice").forEach(btn=>{
@@ -327,6 +422,16 @@ $("spinBtn").onclick=async()=>{
     }
   }
 
+  if(change.special==="stealback" && change.targetId){
+    // FATE BREAK 전용: 상대에게서 무조건 일정량을 되찾아온다
+    const target=roomData.players[change.targetId];
+    const targetOld=Math.max(0,target?.score||0);
+    const actual=Math.min(change.amount||15,targetOld);
+    newScore=Math.max(0,oldScore+actual);
+    extraUpdates[`players/${change.targetId}/score`]=Math.max(0,targetOld-actual);
+    change.message=`FATE BREAK! ${change.targetName}에게서 ${actual}점을 강제로 되찾았어!`;
+  }
+
   if(change.special==="change" && change.targetId){
     const target=roomData.players[change.targetId];
     const targetScore=Math.max(0,target?.score||0);
@@ -338,14 +443,24 @@ $("spinBtn").onclick=async()=>{
   const newDebt=Math.max(0,oldDebt+change.debt);
   const style={...(me.style||{safe:0,greed:0,chaos:0,revenge:0})};
   style[selectedChoice]=(style[selectedChoice]||0)+1;
+
+  // 연속 선택 스트릭 갱신 (같은 운명을 반복 선택하면 다음 라운드 Wheel이 점점 극단적으로 변함)
+  const prevStreak=me.streak||{choice:"",count:0};
+  const streak=prevStreak.choice===selectedChoice
+    ? {choice:selectedChoice,count:(prevStreak.count||0)+1}
+    : {choice:selectedChoice,count:1};
+
   await update(ref(db,"fateRooms/"+room),{
     ...extraUpdates,
     [`players/${playerId}/score`]:newScore,
     [`players/${playerId}/debt`]:newDebt,
     [`players/${playerId}/choice`]:selectedChoice,
     [`players/${playerId}/spun`]:true,
-    [`players/${playerId}/style`]:style
+    [`players/${playerId}/style`]:style,
+    [`players/${playerId}/streak`]:streak
   });
+  // 전체 게임 통계(메인 페이지 리더보드용)에 이번 선택을 누적한다.
+  await update(ref(db,"globalStats/choiceCounts"),{[selectedChoice]:increment(1)});
   $("eventBox").classList.remove("hidden");
   const resultText=change.message || `이번 결과: ${change.score>=0?"+":""}${change.score}점`;
   $("eventBox").innerHTML=`<b>${outcome.name}</b><br>${outcome.text}<br><small>${resultText}</small>`;
@@ -357,6 +472,25 @@ $("nextBtn").onclick=async()=>{
   if(roomData.meta.host!==playerId)return;
   const round=roomData.meta.round||1;
   if(round>=MAX_ROUNDS){
+    // 게임 종료: 각 플레이어의 최종 결과를 메인 페이지에서 볼 수 있는
+    // 전체 리더보드(leaderboard)에 기록한다. game 필드로 어떤 게임에서 온
+    // 기록인지 구분해서, 다른 게임(Form/Wheel/Quiz/Battle)의 기록과 한 곳에서 볼 수 있게 한다.
+    const entries=Object.values(roomData.players||{});
+    await Promise.all(entries.map(p=>{
+      const style=p.style||{safe:0,greed:0,chaos:0,revenge:0};
+      const total=Object.values(style).reduce((a,b)=>a+b,0);
+      const topStyle=total?Object.entries(style).sort((a,b)=>b[1]-a[1])[0][0]:"";
+      return push(ref(db,"leaderboard"),{
+        game:"fate",
+        nickname:p.nickname||"Player",
+        score:p.score||0,
+        debt:p.debt||0,
+        topStyle,
+        room,
+        date:Date.now()
+      });
+    }));
+    await update(ref(db,"globalStats"),{gamesPlayed:increment(1)});
     await update(ref(db,"fateRooms/"+room+"/meta"),{status:"result",phase:"done"});
     return;
   }
@@ -381,6 +515,7 @@ $("againBtn").onclick=async()=>{
       updates[`players/${id}/choice`]="";
       updates[`players/${id}/spun`]=false;
       updates[`players/${id}/style`]={safe:0,greed:0,chaos:0,revenge:0};
+      updates[`players/${id}/streak`]={choice:"",count:0};
     }
 
     // Firebase 저장과 동시에 화면도 즉시 로비로 전환한다.
@@ -391,6 +526,7 @@ $("againBtn").onclick=async()=>{
     Object.values(roomData.players||{}).forEach(p=>{
       p.score=0;p.debt=0;p.choice="";p.spun=false;
       p.style={safe:0,greed:0,chaos:0,revenge:0};
+      p.streak={choice:"",count:0};
     });
     renderRoom();
   }catch(err){
@@ -399,67 +535,92 @@ $("againBtn").onclick=async()=>{
   }
 };
 
+// 현재 플레이어의 선택 반복 횟수(스트릭)에 따라 배율을 계산한다.
+// 같은 운명을 3번 이상 연속 선택하면 점수 폭이 커지고, 그만큼 Fate Debt 증가폭도 커진다.
+function getEscalation(me,choice){
+  const streak=me?.streak;
+  const count=(streak && streak.choice===choice) ? (streak.count||0) : 0;
+  // 3연속부터 단계적으로 강화, 최대 2.0배까지
+  const level=Math.max(0,Math.min(4,count-2));
+  const mult=1+level*0.25;
+  return {mult,count};
+}
+
 function makeSegments(data){
-  const choice=data?.players?.[playerId]?.choice||selectedChoice||"safe";
+  const me=data?.players?.[playerId];
+  const choice=me?.choice||selectedChoice||"safe";
+  const debt=me?.debt||0;
+  const {mult}=getEscalation(me,choice);
+  const leader=getLeaderChoice();
+  const leaderMult=(leader && leader.choice===choice)?LEADER_BONUS:1;
+  const scale=n=>Math.round(n*mult*leaderMult);
+
+  let segs;
 
   // 선택한 운명마다 Wheel 자체가 완전히 달라진다.
-  // 사용자가 정한 핵심 범위:
-  // 안전 +10~-10 / 탐욕 +50~-50 / 복수 +10~-10 + 상대 스틸 ±20
-  // 혼돈 +30~-30 + 상대 점수와 체인지
+  // 기본 범위: 안전 +10~-10 / 탐욕 +50~-50 / 복수 +10~-10 + 상대 스틸 ±20 / 혼돈 +30~-30 + 체인지
+  // 같은 운명을 반복 선택할수록(streak) 위 숫자가 점점 극단적으로 벌어진다.
   if(choice==="safe"){
-    return [
-      {name:"+10",text:"안전한 운명! 10점을 얻는다.",score:10,debt:0},
-      {name:"+7",text:"안전한 운명. 7점을 얻는다.",score:7,debt:0},
-      {name:"+4",text:"안전한 운명. 4점을 얻는다.",score:4,debt:0},
-      {name:"+1",text:"안전하게 1점을 얻는다.",score:1,debt:0},
+    segs=[
+      {name:"+"+scale(10),text:"안전한 운명! "+scale(10)+"점을 얻는다.",score:scale(10),debt:0},
+      {name:"+"+scale(7),text:"안전한 운명. "+scale(7)+"점을 얻는다.",score:scale(7),debt:0},
+      {name:"+"+scale(4),text:"안전한 운명. "+scale(4)+"점을 얻는다.",score:scale(4),debt:0},
+      {name:"+"+scale(1),text:"안전하게 "+scale(1)+"점을 얻는다.",score:scale(1),debt:0},
       {name:"0",text:"아무 일도 일어나지 않는다.",score:0,debt:0},
-      {name:"-1",text:"조금 흔들린다. 1점을 잃는다.",score:-1,debt:0},
-      {name:"-4",text:"4점을 잃는다.",score:-4,debt:0},
-      {name:"-7",text:"7점을 잃는다.",score:-7,debt:0},
-      {name:"-10",text:"안전한 운명의 최저 결과! 10점을 잃는다.",score:-10,debt:0}
+      {name:"-"+scale(1),text:"조금 흔들린다. "+scale(1)+"점을 잃는다.",score:-scale(1),debt:0},
+      {name:"-"+scale(4),text:scale(4)+"점을 잃는다.",score:-scale(4),debt:0},
+      {name:"-"+scale(7),text:scale(7)+"점을 잃는다.",score:-scale(7),debt:0},
+      {name:"-"+scale(10),text:"안전한 운명의 최저 결과! "+scale(10)+"점을 잃는다.",score:-scale(10),debt:0}
     ];
-  }
-
-  if(choice==="greed"){
-    return [
-      {name:"+50",text:"대박! 50점을 얻는다.",score:50,debt:2},
-      {name:"+35",text:"탐욕의 큰 보상! 35점을 얻는다.",score:35,debt:2},
-      {name:"+20",text:"20점을 얻는다.",score:20,debt:1},
-      {name:"+10",text:"10점을 얻는다.",score:10,debt:1},
+  }else if(choice==="greed"){
+    segs=[
+      {name:"+"+scale(50),text:"대박! "+scale(50)+"점을 얻는다.",score:scale(50),debt:2},
+      {name:"+"+scale(35),text:"탐욕의 큰 보상! "+scale(35)+"점을 얻는다.",score:scale(35),debt:2},
+      {name:"+"+scale(20),text:scale(20)+"점을 얻는다.",score:scale(20),debt:1},
+      {name:"+"+scale(10),text:scale(10)+"점을 얻는다.",score:scale(10),debt:1},
       {name:"0",text:"아무것도 얻지 못했다.",score:0,debt:1},
-      {name:"-10",text:"탐욕의 대가로 10점을 잃는다.",score:-10,debt:1},
-      {name:"-20",text:"20점을 잃는다.",score:-20,debt:1},
-      {name:"-35",text:"큰 위험! 35점을 잃는다.",score:-35,debt:2},
-      {name:"-50",text:"탐욕의 최악의 결과! 50점을 잃는다.",score:-50,debt:3}
+      {name:"-"+scale(10),text:"탐욕의 대가로 "+scale(10)+"점을 잃는다.",score:-scale(10),debt:1},
+      {name:"-"+scale(20),text:scale(20)+"점을 잃는다.",score:-scale(20),debt:1},
+      {name:"-"+scale(35),text:"큰 위험! "+scale(35)+"점을 잃는다.",score:-scale(35),debt:2},
+      {name:"-"+scale(50),text:"탐욕의 최악의 결과! "+scale(50)+"점을 잃는다.",score:-scale(50),debt:3}
     ];
-  }
-
-  if(choice==="revenge"){
-    return [
-      {name:"+10",text:"복수 성공! 10점을 얻는다.",score:10,debt:0},
-      {name:"+7",text:"복수의 보상으로 7점을 얻는다.",score:7,debt:0},
-      {name:"+4",text:"4점을 얻는다.",score:4,debt:0},
-      {name:"+1",text:"1점을 얻는다.",score:1,debt:0},
+  }else if(choice==="revenge"){
+    segs=[
+      {name:"+"+scale(10),text:"복수 성공! "+scale(10)+"점을 얻는다.",score:scale(10),debt:0},
+      {name:"+"+scale(7),text:"복수의 보상으로 "+scale(7)+"점을 얻는다.",score:scale(7),debt:0},
+      {name:"+"+scale(4),text:scale(4)+"점을 얻는다.",score:scale(4),debt:0},
+      {name:"+"+scale(1),text:scale(1)+"점을 얻는다.",score:scale(1),debt:0},
       {name:"0",text:"복수에 실패했다. 변화가 없다.",score:0,debt:0},
-      {name:"-1",text:"오히려 1점을 잃는다.",score:-1,debt:0},
-      {name:"-4",text:"4점을 잃는다.",score:-4,debt:0},
-      {name:"-7",text:"7점을 잃는다.",score:-7,debt:0},
-      {name:"-10",text:"복수 실패! 10점을 잃는다.",score:-10,debt:0},
-      {name:"STEAL ±20",text:"상대 한 명의 점수를 최대 20점 범위에서 빼앗거나 넘겨받는다.",type:"steal",debt:1}
+      {name:"-"+scale(1),text:"오히려 "+scale(1)+"점을 잃는다.",score:-scale(1),debt:0},
+      {name:"-"+scale(4),text:scale(4)+"점을 잃는다.",score:-scale(4),debt:0},
+      {name:"-"+scale(7),text:scale(7)+"점을 잃는다.",score:-scale(7),debt:0},
+      {name:"-"+scale(10),text:"복수 실패! "+scale(10)+"점을 잃는다.",score:-scale(10),debt:0},
+      {name:"STEAL ±"+scale(20),text:"상대 한 명의 점수를 최대 "+scale(20)+"점 범위에서 빼앗거나 넘겨받는다.",type:"steal",debt:1}
+    ];
+  }else{
+    // chaos
+    segs=[
+      {name:"+"+scale(30),text:"혼돈의 대박! "+scale(30)+"점을 얻는다.",score:scale(30),debt:2},
+      {name:"+"+scale(20),text:scale(20)+"점을 얻는다.",score:scale(20),debt:1},
+      {name:"+"+scale(10),text:scale(10)+"점을 얻는다.",score:scale(10),debt:1},
+      {name:"0",text:"혼돈 속에서 아무 변화도 없다.",score:0,debt:1},
+      {name:"-"+scale(10),text:scale(10)+"점을 잃는다.",score:-scale(10),debt:1},
+      {name:"-"+scale(20),text:scale(20)+"점을 잃는다.",score:-scale(20),debt:1},
+      {name:"-"+scale(30),text:"혼돈의 최악의 결과! "+scale(30)+"점을 잃는다.",score:-scale(30),debt:2},
+      {name:"CHANGE",text:"상대 한 명과 현재 점수를 서로 교체한다.",type:"change",debt:2}
     ];
   }
 
-  // chaos
-  return [
-    {name:"+30",text:"혼돈의 대박! 30점을 얻는다.",score:30,debt:2},
-    {name:"+20",text:"20점을 얻는다.",score:20,debt:1},
-    {name:"+10",text:"10점을 얻는다.",score:10,debt:1},
-    {name:"0",text:"혼돈 속에서 아무 변화도 없다.",score:0,debt:1},
-    {name:"-10",text:"10점을 잃는다.",score:-10,debt:1},
-    {name:"-20",text:"20점을 잃는다.",score:-20,debt:1},
-    {name:"-30",text:"혼돈의 최악의 결과! 30점을 잃는다.",score:-30,debt:2},
-    {name:"CHANGE",text:"상대 한 명과 현재 점수를 서로 교체한다.",type:"change",debt:2}
-  ];
+  // FATE BREAK: 운명의 빚이 임계치를 넘으면 특수 결과 칸이 Wheel에 추가된다.
+  if(debt>=FATE_BREAK_THRESHOLD){
+    segs=segs.concat([
+      {name:"FATE BREAK -"+scale(40),text:"⚠️ FATE BREAK! 쌓인 운명의 빚이 폭발한다. "+scale(40)+"점을 잃는다.",score:-scale(40),debt:-3,type:"break"},
+      {name:"STEAL BACK",text:"⚠️ FATE BREAK! 상대에게서 점수를 강제로 되찾아온다.",type:"stealback",debt:-2},
+      {name:"DOUBLE LOSS",text:"⚠️ FATE BREAK! 이번 라운드 손실이 두 배가 된다.",type:"doubleloss",debt:-2}
+    ]);
+  }
+
+  return segs;
 }
 
 function resolveOutcome(o,choice){
@@ -474,7 +635,6 @@ function resolveOutcome(o,choice){
     }
     const [targetId,target]=opponents[Math.floor(Math.random()*opponents.length)];
     let amount=Math.floor(Math.random()*41)-20; // -20 ~ +20
-    const me=roomData.players[playerId];
     const available=Math.max(0,target.score||0);
     if(amount>available) amount=available;
     // +면 상대에게서 빼앗아 내 점수로, -면 내가 상대에게 넘긴다.
@@ -499,7 +659,6 @@ function resolveOutcome(o,choice){
       return {score:0,debt,special:"none",message:"상대가 없어 체인지 효과가 취소되었어."};
     }
     const [targetId,target]=opponents[Math.floor(Math.random()*opponents.length)];
-    const me=roomData.players[playerId];
     return {
       score:0,
       debt,
@@ -509,6 +668,26 @@ function resolveOutcome(o,choice){
       swapScore:target.score||0,
       message:`${target.nickname||"상대"}와 점수를 체인지!`
     };
+  }
+
+  if(special==="stealback"){
+    const opponents=Object.entries(roomData.players||{}).filter(([id])=>id!==playerId);
+    if(!opponents.length){
+      return {score:0,debt,special:"none",message:"상대가 없어 STEAL BACK 효과가 취소되었어."};
+    }
+    // 점수가 가장 높은 상대에게서 되찾아온다.
+    const [targetId,target]=opponents.sort((a,b)=>(b[1].score||0)-(a[1].score||0))[0];
+    return {score:0,debt,special:"stealback",targetId,targetName:target.nickname||"상대",amount:15};
+  }
+
+  if(special==="doubleloss"){
+    // 이번 라운드 성향(style)에서 가장 많이 선택한 운명 기준으로 손실 폭을 재계산해 2배로 적용.
+    const base={safe:10,greed:50,chaos:30,revenge:10}[choice]||10;
+    return {score:-base*2,debt,special:"doubleloss",message:`DOUBLE LOSS! ${base*2}점을 잃는다.`};
+  }
+
+  if(special==="break"){
+    return {score,debt,special:"break",message:`FATE BREAK! ${Math.abs(score)}점을 잃는다.`};
   }
 
   return {score,debt,special:"score"};
@@ -530,9 +709,12 @@ function drawWheel(segments,angle=0,choice=selectedChoice){
     const a=angle+i*step;
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a,a+step);ctx.closePath();
     const theme=getChoiceTheme(choice);
-    ctx.fillStyle=theme.fills[i%theme.fills.length];ctx.fill();
-    ctx.strokeStyle=theme.accent;ctx.globalAlpha=.42;ctx.stroke();ctx.globalAlpha=1;
-    ctx.save();ctx.translate(cx,cy);ctx.rotate(a+step/2);ctx.textAlign="right";ctx.fillStyle="#171923";ctx.font="800 15px system-ui";ctx.fillText(s.name,r-12,5);ctx.restore();
+    const isBreak=s.type==="break"||s.type==="stealback"||s.type==="doubleloss";
+    ctx.fillStyle=isBreak?"#3a1010":theme.fills[i%theme.fills.length];ctx.fill();
+    ctx.strokeStyle=isBreak?"#ff5555":theme.accent;ctx.globalAlpha=.42;ctx.stroke();ctx.globalAlpha=1;
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(a+step/2);ctx.textAlign="right";
+    ctx.fillStyle=isBreak?"#ffdddd":"#171923";ctx.font=(isBreak?"900 12px":"800 15px")+" system-ui";
+    ctx.fillText(s.name,r-12,5);ctx.restore();
   });
   const theme=getChoiceTheme(choice);
   ctx.beginPath();ctx.arc(cx,cy,39,0,Math.PI*2);ctx.fillStyle=theme.accent;ctx.fill();
@@ -570,7 +752,35 @@ async function animateWheelToIndex(segments, idx){
 function showResult(){
   show(result);
   const list=Object.values(roomData.players||{}).sort((a,b)=>(b.score||0)-(a.score||0));
-  $("finalScores").innerHTML=list.map(p=>`<div class="score"><span>${escapeHtml(p.nickname||"Player")}</span><b>${p.score||0}</b><small>Fate Debt ${p.debt||0}</small></div>`).join("");
+  $("finalScores").innerHTML=list.map(p=>{
+    const style=p.style||{safe:0,greed:0,chaos:0,revenge:0};
+    const total=Object.values(style).reduce((a,b)=>a+b,0);
+    const top=total?Object.entries(style).sort((a,b)=>b[1]-a[1])[0]:null;
+    const styleNote=top&&top[1]>0?`<br><small>${STYLE_LABELS[top[0]]} 성향 ${Math.round(top[1]/total*100)}%</small>`:"";
+    return `<div class="score"><span>${escapeHtml(p.nickname||"Player")}</span><b>${p.score||0}</b><small>Fate Debt ${p.debt||0}</small>${styleNote}</div>`;
+  }).join("");
+  loadGlobalLeaderboard();
+}
+
+// 메인 페이지와 동일한 leaderboard 노드를 읽어, 모든 게임(Form/Wheel/Quiz/Battle/Fate)을
+// 통틀어 가장 높은 점수 상위 10명을 보여준다. 게임별 스코어 스케일이 다를 수 있으므로
+// game 필드를 함께 표시해 어떤 게임의 기록인지 알 수 있게 한다.
+async function loadGlobalLeaderboard(){
+  const el=$("globalLeaderboard");
+  try{
+    const snap=await get(ref(db,"leaderboard"));
+    const all=snap.val()||{};
+    const rows=Object.values(all).sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,10);
+    if(!rows.length){el.innerHTML="<p>아직 기록이 없어.</p>";return}
+    el.innerHTML=`<div class="scoreGrid" style="grid-template-columns:1fr">${rows.map((r,i)=>`
+      <div class="score" style="text-align:left;display:flex;justify-content:space-between;align-items:center">
+        <span>${i+1}위 · ${escapeHtml(r.nickname||"Player")} <small style="color:#9aa0ae">(${escapeHtml(r.game||"?")})</small></span>
+        <b>${r.score||0}</b>
+      </div>`).join("")}</div>`;
+  }catch(err){
+    el.innerHTML="<p>리더보드를 불러오지 못했어.</p>";
+    console.error(err);
+  }
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 </script>
