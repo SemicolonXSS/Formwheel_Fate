@@ -166,7 +166,7 @@ input:focus{border-color:#555}
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-import { getDatabase, ref, set, get, update, onValue, remove, push, increment } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+import { getDatabase, ref, set, get, update, onValue, remove, push, increment, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBreTSe1m0-xlbF4aupnU5isRZCihR25IE",
@@ -274,10 +274,21 @@ function enterRoom(){
   if(unsubscribe)unsubscribe();
   unsubscribe=onValue(ref(db,"fateRooms/"+room),snap=>{
     if(!snap.exists()){leaveLocal();return}
-    roomData=snap.val(); renderRoom();
+    roomData=snap.val(); renderRoom();syncFateStatistics(roomData).catch(console.error);
   });
 }
 
+let syncingStatistics=false;
+async function syncFateStatistics(data){
+ const receipts=data?.spinReceipts;if(!receipts||syncingStatistics)return;syncingStatistics=true;
+ try{await runTransaction(ref(db,"globalStats"),stats=>{
+  stats=stats||{};stats.spinReceipts=stats.spinReceipts||{};stats.choiceCounts=stats.choiceCounts||{};let changed=false;
+  for(const [id,receipt] of Object.entries(receipts))if(!stats.spinReceipts[id]){
+   stats.spinReceipts[id]=true;stats.choiceCounts[receipt.choice]=(Number(stats.choiceCounts[receipt.choice])||0)+1;changed=true;
+  }return changed?stats:undefined;
+ },{applyLocally:false});}catch{console.warn("선택 통계를 연결 복구 후 재전송합니다.");}finally{syncingStatistics=false;}
+}
+setInterval(()=>{if(roomData)syncFateStatistics(roomData)},5000);
 function renderRoom(){
   const players=roomData.players||{};
   const list=Object.entries(players);
@@ -398,15 +409,18 @@ $("spinBtn").onclick=async()=>{
   const segments=makeSegments(roomData);
   const idx=Math.floor(Math.random()*segments.length);
   const outcome=segments[idx];
+  const expectedRound=roomData.meta.round,choice=selectedChoice,receiptId=crypto.randomUUID();
   await animateWheelToIndex(segments, idx);
-  const change=resolveOutcome(outcome,selectedChoice);
-  const me=roomData.players[playerId];
+  const change=resolveOutcome(outcome,choice);
+  const result=await runTransaction(ref(db,"fateRooms/"+room),current=>{
+  if(!current||current.meta?.status!=="playing"||current.meta.round!==expectedRound||!current.players?.[playerId]||current.players[playerId].spun)return;
+  const me=current.players[playerId];
   const oldScore=me.score||0, oldDebt=me.debt||0;
   let newScore=Math.max(0,oldScore+change.score);
   let extraUpdates={};
 
   if(change.special==="steal" && change.targetId){
-    const target=roomData.players[change.targetId];
+    const target=current.players[change.targetId];
     const targetOld=Math.max(0,target?.score||0);
     const transfer=Math.max(-20,Math.min(20,change.transfer||0));
     if(transfer>0){
@@ -424,7 +438,7 @@ $("spinBtn").onclick=async()=>{
 
   if(change.special==="stealback" && change.targetId){
     // FATE BREAK 전용: 상대에게서 무조건 일정량을 되찾아온다
-    const target=roomData.players[change.targetId];
+    const target=current.players[change.targetId];
     const targetOld=Math.max(0,target?.score||0);
     const actual=Math.min(change.amount||15,targetOld);
     newScore=Math.max(0,oldScore+actual);
@@ -433,7 +447,7 @@ $("spinBtn").onclick=async()=>{
   }
 
   if(change.special==="change" && change.targetId){
-    const target=roomData.players[change.targetId];
+    const target=current.players[change.targetId];
     const targetScore=Math.max(0,target?.score||0);
     extraUpdates[`players/${change.targetId}/score`]=oldScore;
     newScore=targetScore;
@@ -442,25 +456,24 @@ $("spinBtn").onclick=async()=>{
 
   const newDebt=Math.max(0,oldDebt+change.debt);
   const style={...(me.style||{safe:0,greed:0,chaos:0,revenge:0})};
-  style[selectedChoice]=(style[selectedChoice]||0)+1;
+  style[choice]=(style[choice]||0)+1;
 
   // 연속 선택 스트릭 갱신 (같은 운명을 반복 선택하면 다음 라운드 Wheel이 점점 극단적으로 변함)
   const prevStreak=me.streak||{choice:"",count:0};
-  const streak=prevStreak.choice===selectedChoice
-    ? {choice:selectedChoice,count:(prevStreak.count||0)+1}
-    : {choice:selectedChoice,count:1};
+  const streak=prevStreak.choice===choice
+    ? {choice:choice,count:(prevStreak.count||0)+1}
+    : {choice:choice,count:1};
 
-  await update(ref(db,"fateRooms/"+room),{
-    ...extraUpdates,
-    [`players/${playerId}/score`]:newScore,
-    [`players/${playerId}/debt`]:newDebt,
-    [`players/${playerId}/choice`]:selectedChoice,
-    [`players/${playerId}/spun`]:true,
-    [`players/${playerId}/style`]:style,
-    [`players/${playerId}/streak`]:streak
-  });
-  // 전체 게임 통계(메인 페이지 리더보드용)에 이번 선택을 누적한다.
-  await update(ref(db,"globalStats/choiceCounts"),{[selectedChoice]:increment(1)});
+  const updates={...extraUpdates,
+   [`players/${playerId}/score`]:newScore,[`players/${playerId}/debt`]:newDebt,[`players/${playerId}/choice`]:choice,
+   [`players/${playerId}/spun`]:true,[`players/${playerId}/style`]:style,[`players/${playerId}/streak`]:streak};
+  for(const [path,value] of Object.entries(updates)){const [,id,key]=path.split('/');current.players[id][key]=value;}
+  current.choiceCounts=current.choiceCounts||{};current.choiceCounts[choice]=(current.choiceCounts[choice]||0)+1;
+  current.spinReceipts=current.spinReceipts||{};current.spinReceipts[receiptId]={choice,playerId,round:expectedRound};
+  return current;
+ },{applyLocally:false});
+ if(!result.committed){spinning=false;$("spinStatus").textContent="이미 처리된 스핀이거나 라운드가 변경되었습니다.";return;}
+ await syncFateStatistics(result.snapshot.val());
   $("eventBox").classList.remove("hidden");
   const resultText=change.message || `이번 결과: ${change.score>=0?"+":""}${change.score}점`;
   $("eventBox").innerHTML=`<b>${outcome.name}</b><br>${outcome.text}<br><small>${resultText}</small>`;
@@ -786,3 +799,4 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":
 </script>
 </body>
 </html>
+
