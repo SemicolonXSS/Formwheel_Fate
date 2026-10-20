@@ -62,10 +62,10 @@ const setup=$("setup"), lobby=$("lobby"), game=$("game"), result=$("result");
 
 function show(el){[setup,lobby,game,result].forEach(x=>x.classList.add("hidden"));el.classList.remove("hidden")}
 function msg(el,text,danger=false){el.textContent=text;el.classList.remove("hidden");el.classList.toggle("danger",danger)}
-function cleanName(s){return String(s||"").trim().slice(0,12)}
+function cleanName(s){return String(s||"").trim().replace(/\s+/g," ").slice(0,12)}
 function validCode(s){return /^\d{4}$/.test(s)}
-function makeCode(){return String(Math.floor(1000+Math.random()*9000))}
-function pid(){return "p_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8)}
+function makeCode(){return String(1000+crypto.getRandomValues(new Uint32Array(1))[0]%9000)}
+function pid(){return "p_"+crypto.randomUUID().replace(/-/g,"")}
 
 $("createBtn").onclick=async()=>{
   nickname=cleanName($("nickname").value);
@@ -605,6 +605,8 @@ function showResult(){
     const styleNote=top&&top[1]>0?`<br><small>${STYLE_LABELS[top[0]]} 성향 ${Math.round(top[1]/total*100)}%</small>`:"";
     return `<div class="score"><span>${escapeHtml(p.nickname||"Player")}</span><b>${p.score||0}</b><small>Fate Debt ${p.debt||0}</small>${styleNote}</div>`;
   }).join("");
+  const champion=list[0];
+  if(champion){const winner=document.createElement("p");winner.className="fate-champion";winner.textContent=`🏆 이번 판 1위: ${champion.nickname||"Player"} · ${champion.score||0}점`;winner.style.cssText="font-weight:800;text-align:center;padding:10px";$("finalScores").prepend(winner);}
   loadGlobalLeaderboard();
 }
 
