@@ -119,6 +119,22 @@
 
 <script type="module" src="./assets/app.js?v=20261021-random6"></script>
 <script type="module" src="https://semicolonxss.github.io/Formwheel/assets/live-presence.js?v=20261017-duration"></script>
+<script>
+/* Secol Random 8: optional helpers, independent of multiplayer state */
+document.addEventListener("DOMContentLoaded",()=>{
+ const $=id=>document.getElementById(id);
+ const nickname=$("nickname"), key="fw_fate_recent_name_v1";
+ try{if(nickname&&!nickname.value)nickname.value=localStorage.getItem(key)||""}catch{}
+ nickname?.addEventListener("change",()=>{try{localStorage.setItem(key,nickname.value.trim().slice(0,12))}catch{}});
+ const lobby=$("lobby"),tools=document.createElement("div");tools.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px";
+ tools.innerHTML='<button type="button" class="btn secondary" id="fwFateCopy">📋 방 코드 복사</button><span id="fwFateCopyStatus" role="status"></span>';lobby?.appendChild(tools);
+ $("fwFateCopy").onclick=async()=>{const code=$("roomDisplay")?.textContent?.trim();if(!/^\d{4}$/.test(code))return;$("fwFateCopyStatus").textContent="복사 중…";try{await navigator.clipboard.writeText(code);$("fwFateCopyStatus").textContent="복사 완료!"}catch{$("fwFateCopyStatus").textContent="복사가 차단됐어요. 화면의 코드를 직접 복사해 주세요."}};
+ const guide=document.createElement("details");guide.style.cssText="margin-top:12px;padding:12px;border:1px solid #aaa;border-radius:12px";guide.innerHTML='<summary style="cursor:pointer;font-weight:700">🧠 운명 전략 팁</summary><p>안전은 위험도를 관리할 때, 탐욕은 점수가 필요할 때, 혼돈은 역전이 필요할 때, 복수는 상대를 견제할 때 고려해보세요. 결과는 확률적이에요!</p>';$("setup")?.appendChild(guide);
+ const share=document.createElement("button");share.type="button";share.className="btn secondary";share.textContent="📋 이번 판 결과 복사";
+ share.onclick=async()=>{const rows=[...$("finalScores").querySelectorAll(".score")].map(x=>x.textContent.replace(/\s+/g," ").trim());if(!rows.length)return;try{await navigator.clipboard.writeText("🎲 Formwheel Fate 결과\n"+rows.join("\n"));share.textContent="✅ 결과 복사 완료"}catch{share.textContent="복사 제한: 결과를 길게 눌러 복사해 주세요."}};
+ $("result")?.querySelector(".actions")?.appendChild(share);
+});
+</script>
 </body>
 </html>
 
