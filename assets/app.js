@@ -622,7 +622,7 @@ async function loadGlobalLeaderboard(){
     if(!rows.length){el.innerHTML="<p>아직 기록이 없어.</p>";return}
     el.innerHTML=`<div class="scoreGrid" style="grid-template-columns:1fr">${rows.map((r,i)=>`
       <div class="score" style="text-align:left;display:flex;justify-content:space-between;align-items:center">
-        <span>${i+1}위 · ${escapeHtml(r.nickname||"Player")} <small style="color:#9aa0ae">(${escapeHtml(r.game||"?")})</small></span>
+        <span>${i+1}위 · ${escapeHtml(r.nickname||"Player")} <small style="color:#626878">(${escapeHtml(r.game||"?")})</small></span>
         <b>${r.score||0}</b>
       </div>`).join("")}</div>`;
   }catch(err){

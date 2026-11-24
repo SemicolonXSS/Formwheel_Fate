@@ -45,7 +45,7 @@ input:focus{border-color:#555}
 .event{margin-top:12px;padding:13px;border-radius:14px;background:#f5f6f9;line-height:1.5}
 .notice{padding:12px 14px;border-radius:13px;background:#f1f4ff;margin-top:12px;color:#424a61}
 .danger{background:#fff0f0;color:#a33}
-.footer{text-align:center;color:#9aa0ae;font-size:12px;margin:18px}
+.footer{text-align:center;color:#626878;font-size:12px;margin:18px}
 .styleBar{display:flex;height:9px;border-radius:999px;overflow:hidden;margin-top:6px;background:#eef0f5}
 .styleBar span{height:100%}
 .styleLegend{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:#72798a}
